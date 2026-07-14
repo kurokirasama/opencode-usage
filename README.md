@@ -14,7 +14,7 @@ A standalone TypeScript plugin for OpenCode that adds a `/usage` command to disp
 ## Install
 
 ```bash
-cp usage.ts ~/.config/opencode/plugins/usage.ts
+cp usage.ts usage-plugin.ts ~/.config/opencode/plugins/
 ```
 
 Restart OpenCode. The plugin loads automatically.
@@ -47,7 +47,10 @@ Resets in 3h 42m
 
 ## Development
 
-No dependencies, no build step. The plugin is a single TypeScript file. OpenCode compiles it on startup.
+No dependencies, no build step.
+
+- `usage.ts` — core logic (config parsing, API fetch, progress bar rendering). Zero external deps, fully testable outside OpenCode.
+- `usage-plugin.ts` — thin plugin wrapper. Imports `@opencode-ai/plugin` (available via OpenCode's runtime) and registers the `usage` custom tool.
 
 ```bash
 # Run tests
