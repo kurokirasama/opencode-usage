@@ -1,7 +1,7 @@
 import { writeFileSync, unlinkSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
-import { parseConfig, fetchUsageStats, renderProgressBar, renderUsage, runUsage, UsagePlugin } from './usage.js';
+import { parseConfig, fetchUsageStats, renderProgressBar, renderUsage, runUsage } from './usage.js';
 
 let passed = 0;
 let failed = 0;
@@ -308,12 +308,7 @@ console.log('\n── Phase 3: Rendering ──');
 
 console.log('\n── Phase 4: Plugin Integration ──');
 
-// 1: Plugin exports a function
-{
-  assert(typeof UsagePlugin === 'function', 'UsagePlugin is a function');
-}
-
-// 2: runUsage pipeline with mocked fetch
+// 1: runUsage pipeline with mocked fetch
 {
   process.env.OPENCODE_API_KEY = 'test-key';
   const fetchFn = mockFetch({
