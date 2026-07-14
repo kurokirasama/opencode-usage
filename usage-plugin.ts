@@ -1,5 +1,5 @@
 import { tool } from '@opencode-ai/plugin';
-import { runUsage } from './usage';
+import { runUsage } from './usage.js';
 
 export const UsagePlugin = async (ctx: Record<string, unknown>) => {
   return {
