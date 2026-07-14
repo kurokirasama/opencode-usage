@@ -12,7 +12,7 @@
     - [x] Confirm Obsidian vault path for AGENTS_MEMORY — ~/Yandex.Disk/obsidian/vaults/AGENTS_MEMORY/
 - [x] Task: Conductor - User Manual Verification 'Discovery & Context Loading' (Protocol in workflow.md) — 4 skills active, vault searched, 5 core files verified, AGENTS_MEMORY path confirmed
 
-## Phase 2: Core File Creation & Update
+## Phase 2: Core File Creation & Update [checkpoint: 59a207e]
 
 - [x] Task: Create tracks registry and directory
     - [x] Create `conductor/tracks/` directory — already exists with conductor_setup_20260714/
@@ -30,16 +30,16 @@
     - [x] Create initial episodic memory index note (`opencode_quota.md`) with project metadata
 - [x] Task: Update `conductor/workflow.md` with post-archive memory protocol
     - [x] Appended the ordered protocol: archive → git-sync → longterm-memory-orchestrator → longterm-memory-writer → trajectory-log
-- [ ] Task: Conductor - User Manual Verification 'Core File Creation & Update' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Core File Creation & Update' (Protocol in workflow.md) — all 4 artifacts verified, checkpoint 59a207e
 
 ## Phase 3: Synchronization & Finalization
 
-- [ ] Task: Verify all created files against acceptance criteria
-    - [ ] Confirm `conductor/tracks.md` is bulleted list format
-    - [ ] Confirm `conductor/GEMINI.md` has Source Control & Privacy sections
-    - [ ] Confirm root `GEMINI.md` has context-mode routing rules
-    - [ ] Confirm `AGENTS_MEMORY/opencode_quota/` has index note
-    - [ ] Confirm `conductor/workflow.md` has post-archive memory protocol
-- [ ] Task: Register this track in `conductor/tracks.md`
+- [x] Task: Verify all created files against acceptance criteria — all 5 criteria verified in Phase 2 checks
+    - [x] Confirm `conductor/tracks.md` is bulleted list format
+    - [x] Confirm `conductor/GEMINI.md` has Source Control & Privacy sections
+    - [x] Confirm root `GEMINI.md` has context-mode routing rules
+    - [x] Confirm `AGENTS_MEMORY/opencode_quota/` has index note
+    - [x] Confirm `conductor/workflow.md` has post-archive memory protocol
+- [x] Task: Register this track in `conductor/tracks.md` — already registered
 - [ ] Task: Commit all changes with proper commit messages
 - [ ] Task: Conductor - User Manual Verification 'Synchronization & Finalization' (Protocol in workflow.md)
