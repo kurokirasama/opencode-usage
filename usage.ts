@@ -2,6 +2,15 @@ import { readFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
+let pluginTool: ((opts: {
+  description: string;
+  args: Record<string, unknown>;
+  execute: () => Promise<string>;
+}) => unknown) | null = null;
+try {
+  pluginTool = require('@opencode-ai/plugin').tool;
+} catch { /* plugin SDK not available outside OpenCode runtime */ }
+
 export interface UsageStats {
   rolling_usage: number;
   weekly_usage: number;
@@ -199,17 +208,16 @@ export async function runUsage(fetchFn = fetch): Promise<string> {
   return renderUsage(stats, termWidth);
 }
 
-export const UsagePlugin = async () => {
-  const { tool } = await import('@opencode-ai/plugin');
+export const UsagePlugin = async (ctx: Record<string, unknown>) => {
   return {
     tool: {
-      usage: tool({
+      usage: pluginTool ? pluginTool({
         description: 'Fetch and display your OpenCode API quota usage (5h rolling, weekly, monthly).',
         args: {},
         async execute() {
           return await runUsage();
         },
-      }),
+      }) : undefined,
     },
   };
 };
