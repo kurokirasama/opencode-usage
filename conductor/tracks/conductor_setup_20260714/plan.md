@@ -32,7 +32,7 @@
     - [x] Appended the ordered protocol: archive → git-sync → longterm-memory-orchestrator → longterm-memory-writer → trajectory-log
 - [x] Task: Conductor - User Manual Verification 'Core File Creation & Update' (Protocol in workflow.md) — all 4 artifacts verified, checkpoint 59a207e
 
-## Phase 3: Synchronization & Finalization
+## Phase 3: Synchronization & Finalization [checkpoint: 2384213]
 
 - [x] Task: Verify all created files against acceptance criteria — all 5 criteria verified in Phase 2 checks
     - [x] Confirm `conductor/tracks.md` is bulleted list format
@@ -41,5 +41,5 @@
     - [x] Confirm `AGENTS_MEMORY/opencode_quota/` has index note
     - [x] Confirm `conductor/workflow.md` has post-archive memory protocol
 - [x] Task: Register this track in `conductor/tracks.md` — already registered
-- [ ] Task: Commit all changes with proper commit messages
-- [ ] Task: Conductor - User Manual Verification 'Synchronization & Finalization' (Protocol in workflow.md)
+- [x] Task: Commit all changes with proper commit messages — shas: 59a207e (Phase 2), 2384213 (Phase 3)
+- [x] Task: Conductor - User Manual Verification 'Synchronization & Finalization' (Protocol in workflow.md) — all criteria verified, files committed
