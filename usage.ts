@@ -12,129 +12,290 @@ export interface UsageStats {
   reset_time: Date;
 }
 
-interface Credentials {
-  apiKey: string;
+export interface Credentials {
   workspaceId: string;
+  authCookie: string;
 }
 
-export function parseConfig(configPath?: string, authPath?: string): Credentials | string {
-  const envKey = process.env.OPENCODE_API_KEY?.trim();
-  if (envKey) {
-    return { apiKey: envKey, workspaceId: 'wrk_01KVS459SHCESGB9J1W46T6BD5' };
+export function parseConfig(configPath?: string, dedicatedPath?: string): Credentials | string {
+  const envWorkspaceId = process.env.OPENCODE_GO_WORKSPACE_ID?.trim();
+  const envAuthCookie = process.env.OPENCODE_GO_AUTH_COOKIE?.trim();
+  if (envWorkspaceId && envAuthCookie) {
+    return { workspaceId: envWorkspaceId, authCookie: envAuthCookie };
   }
 
-  const authFile = authPath ?? join(homedir(), '.local', 'share', 'opencode', 'auth.json');
-  if (authPath !== '' && existsSync(authFile)) {
+  const mainCfgPath = configPath ?? join(homedir(), '.config', 'opencode', 'opencode.json');
+  if (existsSync(mainCfgPath)) {
     try {
-      const raw = readFileSync(authFile, 'utf-8');
-      const auth = JSON.parse(raw) as Record<string, unknown>;
-      for (const provider of ['opencode-go', 'opencode-zen', 'opencode']) {
-        const entry = auth[provider];
-        if (typeof entry === 'object' && entry !== null) {
-          const key = (entry as Record<string, unknown>).key;
-          if (typeof key === 'string' && key) {
-            return { apiKey: key, workspaceId: 'wrk_01KVS459SHCESGB9J1W46T6BD5' };
-          }
+      const raw = readFileSync(mainCfgPath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const quota = parsed['opencode-go-quota'];
+      if (quota && typeof quota === 'object') {
+        const q = quota as Record<string, unknown>;
+        const workspaceId = typeof q.workspaceId === 'string' ? q.workspaceId.trim() : '';
+        const authCookie = typeof q.authCookie === 'string' ? q.authCookie.trim() : '';
+        if (workspaceId && authCookie) {
+          return { workspaceId, authCookie };
         }
       }
     } catch {
-      // fall through to config file
+      // fall through
     }
   }
 
-  const cfgPath = configPath ?? join(homedir(), '.config', 'opencode', 'opencode.json');
-  let raw: string;
-  try {
-    raw = readFileSync(cfgPath, 'utf-8');
-  } catch {
-    return 'OpenCode config not found at ' + cfgPath;
+  const subCfgPath = dedicatedPath ?? join(homedir(), '.config', 'opencode', 'opencode-quota', 'opencode-go.json');
+  if (existsSync(subCfgPath)) {
+    try {
+      const raw = readFileSync(subCfgPath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const workspaceId = typeof parsed.workspaceId === 'string' ? parsed.workspaceId.trim() : '';
+      const authCookie = typeof parsed.authCookie === 'string' ? parsed.authCookie.trim() : '';
+      if (workspaceId && authCookie) {
+        return { workspaceId, authCookie };
+      }
+    } catch {
+      // fall through
+    }
   }
 
-  let config: unknown;
-  try {
-    config = JSON.parse(raw);
-  } catch {
-    return 'Failed to parse OpenCode config. The file may be corrupted.';
-  }
-
-  if (typeof config !== 'object' || config === null) {
-    return 'No OpenCode API key found in config.';
-  }
-
-  const cfg = config as Record<string, unknown>;
-  const provider = cfg.provider;
-  if (typeof provider !== 'object' || provider === null) {
-    return 'No OpenCode API key found in config.';
-  }
-
-  const providers = provider as Record<string, unknown>;
-  let matchedProvider: Record<string, unknown> | null = null;
-
-  if ('opencode-go' in providers) {
-    matchedProvider = providers['opencode-go'] as Record<string, unknown>;
-  } else if ('opencode-zen' in providers) {
-    matchedProvider = providers['opencode-zen'] as Record<string, unknown>;
-  }
-
-  if (!matchedProvider || typeof matchedProvider.apiKey !== 'string') {
-    return 'No OpenCode API key found in config.';
-  }
-
-  const workspaceId = typeof matchedProvider.workspaceId === 'string'
-    ? matchedProvider.workspaceId
-    : 'wrk_01KVS459SHCESGB9J1W46T6BD5';
-
-  return { apiKey: matchedProvider.apiKey, workspaceId };
+  return 'No workspace credentials found. Configure environment variables or settings_opencode.json.';
 }
 
-export async function fetchUsageStats(
-  apiKey: string,
+// ── Scraper Engine ─────────────────────────────────────
+
+const DASHBOARD_URL_PREFIX = 'https://opencode.ai/workspace/';
+const DASHBOARD_URL_SUFFIX = '/go';
+
+const SCRAPED_NUMBER_PATTERN = String.raw`(-?\d+(?:\.\d+)?)`;
+const RE_ROLLING_PCT_FIRST = new RegExp(
+  String.raw`rollingUsage:\$R\[\d+\]=\{[^}]*usagePercent:${SCRAPED_NUMBER_PATTERN}[^}]*resetInSec:${SCRAPED_NUMBER_PATTERN}[^}]*\}`
+);
+const RE_ROLLING_RESET_FIRST = new RegExp(
+  String.raw`rollingUsage:\$R\[\d+\]=\{[^}]*resetInSec:${SCRAPED_NUMBER_PATTERN}[^}]*usagePercent:${SCRAPED_NUMBER_PATTERN}[^}]*\}`
+);
+const RE_WEEKLY_PCT_FIRST = new RegExp(
+  String.raw`weeklyUsage:\$R\[\d+\]=\{[^}]*usagePercent:${SCRAPED_NUMBER_PATTERN}[^}]*resetInSec:${SCRAPED_NUMBER_PATTERN}[^}]*\}`
+);
+const RE_WEEKLY_RESET_FIRST = new RegExp(
+  String.raw`weeklyUsage:\$R\[\d+\]=\{[^}]*resetInSec:${SCRAPED_NUMBER_PATTERN}[^}]*usagePercent:${SCRAPED_NUMBER_PATTERN}[^}]*\}`
+);
+const RE_MONTHLY_PCT_FIRST = new RegExp(
+  String.raw`monthlyUsage:\$R\[\d+\]=\{[^}]*usagePercent:${SCRAPED_NUMBER_PATTERN}[^}]*resetInSec:${SCRAPED_NUMBER_PATTERN}[^}]*\}`
+);
+const RE_MONTHLY_RESET_FIRST = new RegExp(
+  String.raw`monthlyUsage:\$R\[\d+\]=\{[^}]*resetInSec:${SCRAPED_NUMBER_PATTERN}[^}]*usagePercent:${SCRAPED_NUMBER_PATTERN}[^}]*\}`
+);
+
+export interface ScrapedWindowUsage {
+  usagePercent: number;
+  resetInSec: number;
+}
+
+export function parseHumanReadableTime(timeStr: string): number | null {
+  const normalized = timeStr.toLowerCase().trim().replace(/\s+/g, ' ');
+  if (['reset-now', 'reset now', 'now', 'resets now'].includes(normalized)) {
+    return 0;
+  }
+  let totalSeconds = 0;
+  const dayMatch = normalized.match(/(\d+(?:\.\d+)?)\s*days?/);
+  const hourMatch = normalized.match(/(\d+(?:\.\d+)?)\s*hours?/);
+  const minuteMatch = normalized.match(/(\d+(?:\.\d+)?)\s*minutes?/);
+  const secondMatch = normalized.match(/(\d+(?:\.\d+)?)\s*seconds?/);
+  const hasDuration = Boolean(dayMatch || hourMatch || minuteMatch || secondMatch);
+
+  if (dayMatch) totalSeconds += Number(dayMatch[1]) * 86400;
+  if (hourMatch) totalSeconds += Number(hourMatch[1]) * 3600;
+  if (minuteMatch) totalSeconds += Number(minuteMatch[1]) * 60;
+  if (secondMatch) totalSeconds += Number(secondMatch[1]);
+  return hasDuration ? totalSeconds : null;
+}
+
+export function parseWindowUsage(
+  html: string,
+  rePctFirst: RegExp,
+  reResetFirst: RegExp,
+): ScrapedWindowUsage | null {
+  const pctFirstMatch = rePctFirst.exec(html);
+  if (pctFirstMatch) {
+    const usagePercent = Number(pctFirstMatch[1]);
+    const resetInSec = Number(pctFirstMatch[2]);
+    if (Number.isFinite(usagePercent) && Number.isFinite(resetInSec)) {
+      return { usagePercent, resetInSec };
+    }
+  }
+  const resetFirstMatch = reResetFirst.exec(html);
+  if (resetFirstMatch) {
+    const resetInSec = Number(resetFirstMatch[1]);
+    const usagePercent = Number(resetFirstMatch[2]);
+    if (Number.isFinite(usagePercent) && Number.isFinite(resetInSec)) {
+      return { usagePercent, resetInSec };
+    }
+  }
+  return null;
+}
+
+export function parseDataSlotFormat(html: string): Partial<Record<string, ScrapedWindowUsage>> {
+  const result: Partial<Record<string, ScrapedWindowUsage>> = {};
+  const items = html.split(/data-slot="usage-item"/);
+  for (let i = 1; i < items.length; i++) {
+    const content = items[i];
+    const labelMatch = content.match(/data-slot="usage-label">([^<]+)</);
+    if (!labelMatch) continue;
+    const label = labelMatch[1].trim().toLowerCase();
+
+    const usageMatch = content.match(/data-slot="usage-value">[^0-9]*(\d+(?:\.\d+)?)/);
+    if (!usageMatch) continue;
+    const usagePercent = Number(usageMatch[1]);
+
+    const resetMatch = content.match(/data-slot="(reset-time|reset-now)">([\s\S]*?)<\/span>/);
+    if (!resetMatch) continue;
+
+    const resetContent = resetMatch[2]
+      .replace(/<!--\$-->/g, '')
+      .replace(/<!--\/-->/g, '')
+      .replace(/Resets?\s*in\s*/i, '')
+      .trim();
+
+    const resetInSec = resetMatch[1] === 'reset-now' ? 0 : parseHumanReadableTime(resetContent);
+    if (!Number.isFinite(usagePercent) || resetInSec === null || !Number.isFinite(resetInSec)) continue;
+
+    let windowKey: string | null = null;
+    if (label.includes('rolling')) windowKey = 'rolling';
+    else if (label.includes('weekly')) windowKey = 'weekly';
+    else if (label.includes('monthly')) windowKey = 'monthly';
+
+    if (windowKey) {
+      result[windowKey] = { usagePercent, resetInSec };
+    }
+  }
+  return result;
+}
+
+export async function fetchUsageFromDashboard(
   workspaceId: string,
+  authCookie: string,
   fetchFn = fetch
 ): Promise<UsageStats | string> {
-  const url = `https://opencode.ai/api/workspace/${workspaceId}/usage`;
-  let response: Response;
+  const url = `${DASHBOARD_URL_PREFIX}${encodeURIComponent(workspaceId)}${DASHBOARD_URL_SUFFIX}`;
   try {
-    response = await fetchFn(url, {
-      headers: { Authorization: `Bearer ${apiKey}` }
+    const res = await fetchFn(url, {
+      headers: {
+        Accept: 'text/html',
+        Cookie: `auth=${authCookie}`,
+      }
     });
+    if (!res.ok) {
+      return `Scraper error ${res.status}: ${res.statusText}`;
+    }
+    const html = await res.text();
+
+    const rolling = parseWindowUsage(html, RE_ROLLING_PCT_FIRST, RE_ROLLING_RESET_FIRST);
+    const weekly = parseWindowUsage(html, RE_WEEKLY_PCT_FIRST, RE_WEEKLY_RESET_FIRST);
+    const monthly = parseWindowUsage(html, RE_MONTHLY_PCT_FIRST, RE_MONTHLY_RESET_FIRST);
+
+    const dataSlot = parseDataSlotFormat(html);
+
+    const finalRolling = rolling || dataSlot.rolling;
+    const finalWeekly = weekly || dataSlot.weekly;
+    const finalMonthly = monthly || dataSlot.monthly;
+
+    if (!finalRolling && !finalWeekly && !finalMonthly) {
+      return 'Could not parse any known OpenCode Go dashboard usage windows.';
+    }
+
+    const now = Date.now();
+    return {
+      rolling_usage: finalRolling ? Math.round((finalRolling.usagePercent / 100) * 12 * 100) / 100 : 0,
+      weekly_usage: finalWeekly ? Math.round((finalWeekly.usagePercent / 100) * 30 * 100) / 100 : 0,
+      monthly_usage: finalMonthly ? Math.round((finalMonthly.usagePercent / 100) * 60 * 100) / 100 : 0,
+      limit_rolling: 12,
+      limit_weekly: 30,
+      limit_monthly: 60,
+      reset_time: finalRolling
+        ? new Date(now + finalRolling.resetInSec * 1000)
+        : new Date(now + 5 * 3600 * 1000),
+    };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return `Failed to reach OpenCode API: ${msg}`;
+    return `Dashboard connection failure: ${msg}`;
+  }
+}
+
+// ── SQLite Fallback Engine ─────────────────────────────
+
+export async function queryUsageLocal(dbPath?: string): Promise<UsageStats | string> {
+  const path = dbPath ?? join(homedir(), '.local', 'share', 'opencode', 'opencode.db');
+  if (!existsSync(path)) {
+    return `OpenCode local database not found at ${path}`;
   }
 
-  if (response.status !== 200) {
-    return `OpenCode API returned status ${response.status}.`;
-  }
-
-  let data: Record<string, unknown>;
+  let db: { prepare: (sql: string) => { get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[] }; close: () => void };
   try {
-    data = await response.json() as Record<string, unknown>;
+    try {
+      const mod = await import('bun:sqlite');
+      const Database = (mod as Record<string, unknown>).Database as new (path: string, opts?: Record<string, unknown>) => {
+        prepare: (sql: string) => { get: (...args: unknown[]) => unknown; all: (...args: unknown[]) => unknown[] };
+        close: () => void;
+      };
+      db = new Database(path, { readonly: true }) as unknown as typeof db;
+    } catch {
+      const { DatabaseSync } = await import('node:sqlite');
+      db = new DatabaseSync(path) as unknown as typeof db;
+    }
   } catch {
-    return 'Received unexpected API response. Usage data may be incomplete.';
+    return 'No SQLite database drivers available in this environment.';
   }
 
-  const num = (key: string) => typeof data[key] === 'number' ? data[key] as number : 0;
+  try {
+    const now = Date.now();
+    const rollingStart = now - 5 * 3600 * 1000;
+    const weeklyStart = now - 7 * 86400 * 1000;
+    const d = new Date();
+    const monthlyStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
 
-  let reset_time: Date;
-  const rt = data.reset_time;
-  if (typeof rt === 'string') {
-    reset_time = new Date(rt);
-  } else if (typeof rt === 'number') {
-    reset_time = new Date(Date.now() + rt * 1000);
-  } else {
-    reset_time = new Date();
+    const getOne = (sql: string, params: unknown[]) => {
+      const stmt = db.prepare(sql);
+      if (typeof (stmt as Record<string, unknown>).get === 'function') {
+        return (stmt as Record<string, unknown>).get(...params) as Record<string, unknown> | undefined;
+      }
+      return (stmt.all(...params) as Record<string, unknown>[])[0];
+    };
+
+    const rolling = getOne(
+      'SELECT COALESCE(SUM(cost), 0) AS total, MIN(time_created) AS oldest FROM session WHERE time_created > ?',
+      [rollingStart]
+    );
+    const weekly = getOne(
+      'SELECT COALESCE(SUM(cost), 0) AS total FROM session WHERE time_created > ?',
+      [weeklyStart]
+    );
+    const monthly = getOne(
+      'SELECT COALESCE(SUM(cost), 0) AS total FROM session WHERE time_created > ?',
+      [monthlyStart]
+    );
+
+    const rollingCost = Number(rolling?.total ?? 0);
+    const oldest = rolling?.oldest != null ? Number(rolling.oldest) : 0;
+
+    let reset_time: Date;
+    if (oldest > 0) {
+      reset_time = new Date(oldest + 5 * 3600 * 1000);
+    } else {
+      reset_time = new Date(now + 5 * 3600 * 1000);
+    }
+
+    return {
+      rolling_usage: rollingCost,
+      weekly_usage: Number(weekly?.total ?? 0),
+      monthly_usage: Number(monthly?.total ?? 0),
+      limit_rolling: 12,
+      limit_weekly: 30,
+      limit_monthly: 60,
+      reset_time,
+    };
+  } finally {
+    try { db.close(); } catch { /* ignore */ }
   }
-
-  return {
-    rolling_usage: num('rolling_usage'),
-    weekly_usage: num('weekly_usage'),
-    monthly_usage: num('monthly_usage'),
-    limit_rolling: num('limit_rolling'),
-    limit_weekly: num('limit_weekly'),
-    limit_monthly: num('limit_monthly'),
-    reset_time,
-  };
 }
 
 const FULL = '█';
@@ -191,10 +352,19 @@ export function renderUsage(stats: UsageStats, termWidth = 80): string {
 
 export async function runUsage(fetchFn = fetch): Promise<string> {
   const creds = parseConfig();
-  if (typeof creds === 'string') return creds;
-  const stats = await fetchUsageStats(creds.apiKey, creds.workspaceId, fetchFn);
-  if (typeof stats === 'string') return stats;
+  if (typeof creds !== 'string') {
+    const stats = await fetchUsageFromDashboard(creds.workspaceId, creds.authCookie, fetchFn);
+    if (typeof stats !== 'string') {
+      const termWidth = typeof process !== 'undefined' && process.stdout?.columns
+        ? process.stdout.columns : 80;
+      return renderUsage(stats, termWidth);
+    }
+    // ponytail: scraper failed — fall through to SQLite fallback
+  }
+
+  const localStats = await queryUsageLocal();
+  if (typeof localStats === 'string') return localStats;
   const termWidth = typeof process !== 'undefined' && process.stdout?.columns
     ? process.stdout.columns : 80;
-  return renderUsage(stats, termWidth);
+  return renderUsage(localStats, termWidth);
 }
